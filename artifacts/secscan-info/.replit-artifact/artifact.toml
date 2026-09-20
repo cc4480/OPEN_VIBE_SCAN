@@ -1,0 +1,28 @@
+kind = "web"
+previewPath = "/secscan-info/"
+title = "SecScan Info"
+description = "The public information website for SecScan, a plain-English black-box security scanner for publicly deployed websites and AI-generated apps."
+version = "1.0.0"
+id = "artifacts/secscan-info"
+router = "path"
+
+[[services]]
+name = "web"
+paths = [ "/secscan-info/" ]
+localPort = 23209
+
+[services.development]
+run = "pnpm --filter @workspace/secscan-info run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/secscan-info", "run", "build" ]
+serve = "static"
+publicDir = "artifacts/secscan-info/dist/public"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "23209"
+BASE_PATH = "/secscan-info/"
