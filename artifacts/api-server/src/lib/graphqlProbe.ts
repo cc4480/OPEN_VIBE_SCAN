@@ -11,6 +11,7 @@
 
 import { randomUUID } from "node:crypto";
 import type { ScanVulnerability } from "./scanner";
+import { validatedFetch } from "./targetGuard";
 
 const TIMEOUT_MS = 8_000;
 
@@ -25,13 +26,12 @@ async function safePost(
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
   try {
-    const res = await fetch(url, {
+    const res = await validatedFetch(url, {
       method: "POST",
       signal: controller.signal,
       headers: { "Content-Type": "application/json", "Accept": "application/json" },
       body: JSON.stringify(body),
-      redirect: "follow",
-    });
+    }, { timeoutMs: TIMEOUT_MS });
     const text = await res.text().catch(() => "");
     const headers: Record<string, string> = {};
     res.headers.forEach((v, k) => { headers[k.toLowerCase()] = v; });

@@ -147,6 +147,8 @@ export const CreateScanHeader = zod.object({
 export const CreateScanBody = zod.object({
   targetUrl: zod.string(),
   tier: zod.enum(["basic", "deep", "pack_5", "pack_20"]),
+  // Added for the AI-analysis opt-out (mirrors the orval spec change).
+  aiOptOut: zod.boolean().optional().describe("Skip third-party AI analysis of this scan's findings."),
 });
 
 /**

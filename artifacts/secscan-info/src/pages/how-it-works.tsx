@@ -6,31 +6,37 @@ export default function HowItWorks() {
   const steps = [
     {
       icon: Search,
-      title: "1. The Target Phase",
+      title: "1. Prove Ownership",
+      desc: "Before anything is scanned, you prove you control the target: we give you a unique token to publish as a DNS TXT record (_secscan-challenge) on the domain. The scan stays blocked until the record is detected.",
+      details: ["DNS TXT challenge per domain", "Verification valid for 30 days", "No scan without proof of control"]
+    },
+    {
+      icon: Loader2,
+      title: "2. The Target Phase",
       desc: "Provide any public URL. VibeScan resolves the host, checks routing, and identifies the core technology stack to tailor the scan payload.",
       details: ["Fingerprints frameworks (Next.js, React, etc.)", "Detects CDNs (Cloudflare, Vercel)", "Maps baseline architecture"]
     },
     {
       icon: Loader2,
-      title: "2. Active Scanning",
+      title: "3. Active Scanning",
       desc: "The engine runs a full OWASP coverage suite, actively probing for common mistakes in modern web applications without brute-forcing.",
       details: ["Evaluates SSL/TLS and DNS records", "Probes for exposed files (.env, .git)", "Checks HTTP security headers"]
     },
     {
       icon: FileSearch,
-      title: "3. Evidence Collection",
+      title: "4. Evidence Collection",
       desc: "Every vulnerability found is backed by hard evidence. We capture the exact request and response headers so you aren't chasing ghosts.",
       details: ["No black-box mystery", "Direct proof of exposure", "Reduced false positives"]
     },
     {
       icon: ShieldAlert,
-      title: "4. AI Synthesis & Prioritization",
-      desc: "Raw CVSS scores are confusing. DeepSeek AI reads the evidence and provides a contextual severity score alongside plain-English fix instructions.",
+      title: "5. AI Synthesis & Prioritization",
+      desc: "Raw CVSS scores are confusing. DeepSeek AI reads the evidence and provides a contextual severity score alongside plain-English fix instructions. Evidence is scrubbed of secrets first, and you can opt out of AI analysis per scan.",
       details: ["Clear, actionable language", "Framework-specific fix steps", "Severity vs Confidence ratings"]
     },
     {
       icon: RotateCw,
-      title: "5. Fix & Rescan",
+      title: "6. Fix & Rescan",
       desc: "Security is iterative. Apply the fix and run a differential scan to verify the vulnerability is closed in production.",
       details: ["Instant validation", "Continuous monitoring available", "Historical posture tracking"]
     }

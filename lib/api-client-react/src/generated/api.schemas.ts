@@ -121,6 +121,8 @@ export interface ScanStatus {
 export interface CreateScanRequest {
   targetUrl: string;
   tier: ScanTier;
+  /** Skip third-party AI analysis of this scan's findings. */
+  aiOptOut?: boolean;
 }
 
 export interface CreateScanResponse {

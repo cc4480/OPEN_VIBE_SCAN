@@ -3,11 +3,17 @@ import { db, reportsTable, reportSharesTable } from "@workspace/db";
 import { eq, and, isNull } from "drizzle-orm";
 import { randomBytes } from "node:crypto";
 import { z } from "zod";
+import { rateLimit } from "../middlewares/rateLimit";
 
 const router: IRouter = Router();
 
+/**
+ * Share links expire by default (30 days). "never" is still available as an
+ * explicit choice, but it must never be the default — a forgotten link should
+ * stop working on its own.
+ */
 const CreateShareBody = z.object({
-  expiresIn: z.enum(["7d", "30d", "never"]).default("never"),
+  expiresIn: z.enum(["7d", "30d", "never"]).default("30d"),
 });
 
 function computeExpiry(expiresIn: "7d" | "30d" | "never"): Date | null {
@@ -167,7 +173,19 @@ router.delete("/reports/:id/shares/:token", async (req, res): Promise<void> => {
 });
 
 // ── GET /api/share/:token — public share endpoint (no auth required) ──────────
-router.get("/share/:token", async (req, res): Promise<void> => {
+// Unauthenticated, so it gets its own strict rate limit: 60 requests per
+// minute per IP. This is the only endpoint that serves report data without
+// a login, so it must not be enumerable at speed.
+const publicShareLimiter = rateLimit({
+  windowMs: 60_000,
+  max: 60,
+  message: "Too many requests. Please wait before trying again.",
+  // Fixed namespace: without this, each :token would get its own bucket and
+  // token enumeration would never trip the limit.
+  namespace: "public-share",
+});
+
+router.get("/share/:token", publicShareLimiter, async (req, res): Promise<void> => {
   const token = Array.isArray(req.params.token) ? req.params.token[0] : req.params.token;
 
   try {

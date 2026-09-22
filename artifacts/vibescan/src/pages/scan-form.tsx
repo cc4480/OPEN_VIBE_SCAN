@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useLocation } from "wouter";
-import { useCreateScan, useGetCredits } from "@workspace/api-client-react";
-import { Shield, Zap, Globe, Lock, CheckCircle2, Loader2 } from "lucide-react";
+import { useCreateScan, useGetCredits, ApiError } from "@workspace/api-client-react";
+import { Shield, Zap, Globe, Lock, CheckCircle2, Loader2, KeyRound } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { ScanTier } from "@workspace/api-client-react";
 
@@ -14,6 +14,34 @@ function getFriendlyError(err: unknown): string {
   if (/unauthorized|401/i.test(msg)) return "Session token missing. Please refresh the page and try again.";
   const clean = msg.replace(/^HTTP \d{3} [^:]+:\s*/, "");
   return clean.length > 120 ? clean.slice(0, 120) + "…" : clean;
+}
+
+interface VerificationChallenge {
+  hostname: string;
+  token: string;
+  txtName: string;
+  instructions: string;
+  status: "pending" | "verified";
+  expiresAt: string | null;
+}
+
+function getVerificationChallenge(err: unknown): VerificationChallenge | null {
+  if (err instanceof ApiError && err.status === 403) {
+    const data = err.data as { code?: string; verification?: VerificationChallenge | null } | null;
+    if (data?.code === "TARGET_NOT_VERIFIED" && data.verification) {
+      return data.verification;
+    }
+  }
+  return null;
+}
+
+function authHeaders(): HeadersInit {
+  try {
+    const token = localStorage.getItem("vibescan_client_token");
+    return token ? { Authorization: `Bearer ${token}` } : {};
+  } catch {
+    return {};
+  }
 }
 
 type TierConfig = {
@@ -43,6 +71,10 @@ const TIERS: TierConfig[] = [
 export default function ScanFormPage() {
   const [url, setUrl] = useState("");
   const [tier, setTier] = useState<ScanTier>("deep");
+  const [aiOptOut, setAiOptOut] = useState(false);
+  const [challenge, setChallenge] = useState<VerificationChallenge | null>(null);
+  const [confirming, setConfirming] = useState(false);
+  const [confirmMsg, setConfirmMsg] = useState<string | null>(null);
   const [, setLocation] = useLocation();
 
   const { data: credits, isLoading: loadingCredits } = useGetCredits();
@@ -51,27 +83,64 @@ export default function ScanFormPage() {
   const selectedTier = TIERS.find((t) => t.id === tier);
   const hasCredits = credits && credits.balance > 0;
 
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-
-    let targetUrl = url;
-    if (!url.trim()) return;
-    if (!/^https?:\/\//i.test(targetUrl)) {
-      targetUrl = "https://" + targetUrl;
-    }
-
+  const launchScan = (targetUrl: string) => {
+    setConfirmMsg(null);
     createScan.mutate(
-      { data: { targetUrl, tier } },
+      { data: { targetUrl, tier, aiOptOut } },
       {
         onSuccess: (data) => {
+          setChallenge(null);
           if (data.checkoutUrl) {
             window.location.href = data.checkoutUrl;
           } else {
             setLocation(`/scan/${data.scanId}`);
           }
         },
+        onError: (err) => {
+          const ch = getVerificationChallenge(err);
+          if (ch) setChallenge(ch);
+        },
       },
     );
+  };
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!url.trim()) return;
+    let targetUrl = url;
+    if (!/^https?:\/\//i.test(targetUrl)) {
+      targetUrl = "https://" + targetUrl;
+    }
+    setChallenge(null);
+    launchScan(targetUrl);
+  };
+
+  const handleConfirmVerification = async () => {
+    if (!challenge) return;
+    setConfirming(true);
+    setConfirmMsg(null);
+    try {
+      const res = await fetch("/api/verify/confirm", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...authHeaders() },
+        body: JSON.stringify({ hostname: challenge.hostname }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && (data.verified || data.status === "verified")) {
+        let targetUrl = url;
+        if (!/^https?:\/\//i.test(targetUrl)) targetUrl = "https://" + targetUrl;
+        setChallenge(null);
+        launchScan(targetUrl);
+      } else {
+        setConfirmMsg(
+          data.error ?? "TXT record not detected yet. DNS changes can take a few minutes to propagate.",
+        );
+      }
+    } catch {
+      setConfirmMsg("Could not reach the server. Try again in a moment.");
+    } finally {
+      setConfirming(false);
+    }
   };
 
   return (
@@ -84,7 +153,7 @@ export default function ScanFormPage() {
           Launch Security Scan
         </h1>
         <p className="text-muted-foreground text-lg">
-          Paste any publicly accessible URL — your app, a client's site, or any live website.
+          Scan a site you own or have permission to test — you'll verify ownership with a quick DNS TXT record.
         </p>
       </div>
 
@@ -110,7 +179,7 @@ export default function ScanFormPage() {
               />
             </div>
             <p className="text-xs text-muted-foreground ml-1">
-              Any publicly accessible website works. Only scan sites you have permission to test.
+              Enter the full URL of the site you control. A DNS TXT record check runs before the scan starts.
             </p>
           </div>
 
@@ -180,6 +249,25 @@ export default function ScanFormPage() {
             </div>
           </div>
 
+          {/* AI analysis opt-out */}
+          <div className="pt-2">
+            <label className="flex items-start gap-3 cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={aiOptOut}
+                onChange={(e) => setAiOptOut(e.target.checked)}
+                className="mt-1 w-4 h-4 accent-primary"
+              />
+              <span className="text-sm">
+                <span className="font-semibold">Skip AI analysis</span>
+                <span className="text-muted-foreground">
+                  {" "}— findings stay in the technical report only. AI summaries get more context-aware
+                  fixes, but they send redacted scan evidence to our AI provider.
+                </span>
+              </span>
+            </label>
+          </div>
+
           {/* Submit */}
           <div className="pt-6 border-t border-white/5 flex flex-col items-center gap-4">
             <button
@@ -198,7 +286,45 @@ export default function ScanFormPage() {
               )}
             </button>
 
-            {createScan.isError && (
+            {challenge && (
+              <div className="w-full max-w-xl rounded-2xl border border-amber-400/30 bg-amber-400/5 p-5 text-left">
+                <div className="flex items-center gap-2 mb-3">
+                  <KeyRound className="w-5 h-5 text-amber-300" />
+                  <h3 className="font-bold">Verify you control {challenge.hostname}</h3>
+                </div>
+                <p className="text-sm text-muted-foreground mb-4">
+                  Add this DNS TXT record at your domain registrar or DNS provider, then press
+                  check below. The scan stays blocked until we detect it.
+                </p>
+                <div className="rounded-xl bg-background/80 border border-white/10 p-4 font-mono text-xs sm:text-sm break-all space-y-2">
+                  <div>
+                    <div className="text-muted-foreground text-[11px] uppercase tracking-wider mb-1">Name</div>
+                    <div className="text-amber-200">{challenge.txtName}</div>
+                  </div>
+                  <div>
+                    <div className="text-muted-foreground text-[11px] uppercase tracking-wider mb-1">Value</div>
+                    <div className="text-amber-200">{challenge.token}</div>
+                  </div>
+                </div>
+                {confirmMsg && (
+                  <p className="text-amber-300/90 text-sm mt-3">{confirmMsg}</p>
+                )}
+                <button
+                  type="button"
+                  onClick={handleConfirmVerification}
+                  disabled={confirming}
+                  className="mt-4 px-5 py-2.5 bg-amber-400/90 hover:bg-amber-300 text-black font-semibold rounded-xl text-sm disabled:opacity-50 disabled:cursor-not-allowed transition-all flex items-center gap-2"
+                >
+                  {confirming ? (
+                    <><Loader2 className="w-4 h-4 animate-spin" /> Checking DNS…</>
+                  ) : (
+                    "I've added the record — check again"
+                  )}
+                </button>
+              </div>
+            )}
+
+            {createScan.isError && !challenge && (
               <p className="text-red-400 text-sm text-center">
                 {getFriendlyError(createScan.error)}
               </p>

@@ -58,6 +58,8 @@ export interface ScanJobData {
   tier: string;
   /** Set when this scan was triggered by the monitor scheduler */
   monitorSubscriptionId?: string;
+  /** Skip third-party AI analysis of this scan's findings */
+  aiOptOut?: boolean;
 }
 
 export async function enqueueScan(data: ScanJobData): Promise<string | null> {

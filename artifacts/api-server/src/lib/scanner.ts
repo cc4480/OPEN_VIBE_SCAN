@@ -12,6 +12,7 @@
  */
 
 import { randomUUID } from "node:crypto";
+import { validatedFetch } from "./targetGuard";
 
 /**
  * Checks whether a hostname appears to be on the HSTS preload list.
@@ -58,7 +59,7 @@ async function isHstsPreloaded(hostname: string): Promise<boolean> {
   try {
     const ctrl2 = new AbortController();
     const timer2 = setTimeout(() => ctrl2.abort(), 5_000);
-    const httpRes = await fetch(`http://${apex}/`, { redirect: "follow", signal: ctrl2.signal });
+    const httpRes = await validatedFetch(`http://${apex}/`, { signal: ctrl2.signal }, { timeoutMs: 5_000 });
     clearTimeout(timer2);
     if (httpRes.url.startsWith("https://")) return true;
   } catch { /* fall through */ }
@@ -249,9 +250,8 @@ export async function runScan(targetUrl: string, tier: string, onStep?: StepCall
   let html = "";
 
   try {
-    response = await fetch(targetUrl, {
+    response = await validatedFetch(targetUrl, {
       signal: controller.signal,
-      redirect: "follow",
       headers: {
         "User-Agent":
           "Mozilla/5.0 (compatible; VibeScan-Security-Bot/1.0; +https://vibescan.app/bot)",

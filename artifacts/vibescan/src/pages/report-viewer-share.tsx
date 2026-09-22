@@ -133,7 +133,7 @@ export interface ShareLink {
 export function ShareButton({ reportId }: { reportId: string }) {
   const [open, setOpen] = useState(false);
   const [copiedToken, setCopiedToken] = useState<string | null>(null);
-  const [expiresIn, setExpiresIn] = useState<"7d" | "30d" | "never">("never");
+  const [expiresIn, setExpiresIn] = useState<"7d" | "30d" | "never">("30d");
   const queryClient = useQueryClient();
 
   const { data: shares = [], isLoading: loadingShares } = useListReportShares(reportId, {

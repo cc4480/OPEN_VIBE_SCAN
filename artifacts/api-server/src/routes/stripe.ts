@@ -80,6 +80,7 @@ router.post(
               userId: scan.userId,
               targetUrl: scan.targetUrl,
               tier: scan.tier,
+              aiOptOut: scan.aiOptOut,
             });
 
             await db

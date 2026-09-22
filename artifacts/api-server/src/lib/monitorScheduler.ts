@@ -19,6 +19,7 @@ import { logger } from "./logger";
 import { fetchRecentCves, matchCvesToTechnologies } from "./cveMonitor";
 import { sendMonitorCveAlertEmail, sendMonitorScanQueuedEmail } from "./mailer";
 import { randomUUID } from "node:crypto";
+import { checkTargetGate } from "./verification";
 
 const WEEKLY_QUEUE    = "monitor-weekly-scans";
 const CVE_QUEUE       = "monitor-cve-check";
@@ -53,6 +54,17 @@ async function runWeeklyScans(): Promise<void> {
 
   for (const sub of due) {
     try {
+      // Re-check the target gate: DNS may have changed since subscription
+      // creation, and the verification may have lapsed.
+      const gate = await checkTargetGate(sub.userId, sub.targetUrl);
+      if (!gate.ok) {
+        log.warn(
+          { subscriptionId: sub.id, reason: gate.reason },
+          "Skipping weekly rescan — target gate failed",
+        );
+        continue;
+      }
+
       const [scan] = await db
         .insert(scansTable)
         .values({
@@ -149,6 +161,15 @@ async function runCveCheck(): Promise<void> {
       );
 
       // Create a new scan triggered by CVE match
+      const gate = await checkTargetGate(sub.userId, sub.targetUrl);
+      if (!gate.ok) {
+        log.warn(
+          { subscriptionId: sub.id, reason: gate.reason },
+          "Skipping CVE-triggered rescan — target gate failed",
+        );
+        continue;
+      }
+
       const [scan] = await db
         .insert(scansTable)
         .values({

@@ -5,6 +5,9 @@ import { z } from "zod";
 import { enqueueScan } from "../lib/queue";
 import { scansTable } from "@workspace/db";
 import { logger } from "../lib/logger";
+import { assertTargetSafe, TargetValidationError } from "../lib/targetGuard";
+import { isVerified, issueChallenge } from "../lib/verification";
+import { rateLimit } from "../middlewares/rateLimit";
 
 const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
 
@@ -34,7 +37,14 @@ const CreateMonitorBody = z.object({
 // Create a new monitoring subscription for a URL.
 // With DISABLE_PAYMENTS=true this is granted immediately.
 
-router.post("/monitor/subscriptions", async (req, res): Promise<void> => {
+router.post(
+  "/monitor/subscriptions",
+  rateLimit({
+    windowMs: 60 * 60 * 1000,
+    max: 10,
+    message: "Too many monitor subscription requests. Please wait before trying again.",
+  }),
+  async (req, res): Promise<void> => {
   if (!req.isAuthenticated()) {
     res.status(401).json({ error: "Unauthorized" });
     return;
@@ -47,6 +57,30 @@ router.post("/monitor/subscriptions", async (req, res): Promise<void> => {
   }
 
   const { targetUrl, webhookUrl } = parsed.data;
+
+  // Same gate as scan intake: the target must be structurally safe, resolve
+  // to public IPs, and be DNS-verified by this user.
+  let hostname: string;
+  try {
+    hostname = (await assertTargetSafe(targetUrl)).hostname;
+  } catch (err) {
+    if (err instanceof TargetValidationError) {
+      res.status(400).json({ error: err.message, code: err.code });
+    } else {
+      res.status(400).json({ error: "Invalid target URL." });
+    }
+    return;
+  }
+  if (!(await isVerified(req.user.id, hostname))) {
+    const challenge = await issueChallenge(req.user.id, hostname).catch(() => null);
+    res.status(403).json({
+      error:
+        "This target has not been verified. Add the DNS TXT record below to prove you control it, then try again.",
+      code: "TARGET_NOT_VERIFIED",
+      verification: challenge,
+    });
+    return;
+  }
 
   // Check for an existing active subscription for this user+URL
   const [existing] = await db
@@ -128,7 +162,8 @@ router.post("/monitor/subscriptions", async (req, res): Promise<void> => {
     logger.error({ err }, "Failed to enqueue initial monitor scan");
     res.status(201).json({ subscription: sub, initialScanId: null });
   }
-});
+  },
+);
 
 // ── GET /api/monitor/subscriptions ───────────────────────────────────────────
 // List all monitor subscriptions for the authenticated user.

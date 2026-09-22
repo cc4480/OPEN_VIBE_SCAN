@@ -13,6 +13,7 @@
 
 import { randomUUID } from "node:crypto";
 import type { ScanVulnerability } from "./scanner";
+import { validatedFetch } from "./targetGuard";
 
 const TIMEOUT_MS = 8_000;
 
@@ -26,11 +27,10 @@ async function safeGet(
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
   try {
-    const res = await fetch(url, {
+    const res = await validatedFetch(url, {
       signal: controller.signal,
-      redirect: "follow",
       headers: { "Accept": "application/xml,application/json,*/*" },
-    });
+    }, { timeoutMs: TIMEOUT_MS });
     const body = await res.text().catch(() => "");
     const headers: Record<string, string> = {};
     res.headers.forEach((v, k) => { headers[k.toLowerCase()] = v; });

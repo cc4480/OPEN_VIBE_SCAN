@@ -71,6 +71,39 @@ export interface AiAnalysisResult {
   detectedAgent: AgentEnvironment;
 }
 
+// ─── Evidence minimization ──────────────────────────────────────────────────
+
+/**
+ * Redact likely secrets from finding evidence before it leaves for the
+ * third-party AI provider. The AI needs the *shape* of a finding (header
+ * present/missing, token format), not the live secret values.
+ *
+ * Redacts:
+ *  - key=value / key: value pairs for secret-ish names (token, secret, key,
+ *    password, auth, session, api_key, private …)
+ *  - Authorization / Proxy-Authorization / Cookie header values
+ *  - standalone high-entropy blobs (32+ chars of base64/hex) that look like
+ *    tokens rather than prose
+ */
+const SECRET_NAME_RE =
+  /\b(api[_-]?key|secret|passwd|password|pwd|token|auth|bearer|session[_-]?id|private[_-]?key|client[_-]?secret)\b\s*[:=]\s*("[^"]*"|'[^']*'|[^\s,;}]+)/gi;
+const AUTH_HEADER_RE = /((?:authorization|proxy-authorization|cookie)\s*:\s*)([^\r\n]+)/gi;
+const ENTROPY_BLOB_RE = /\b[A-Za-z0-9+/=_-]{32,}\b/g;
+
+export function redactSensitiveEvidence(evidence: string): string {
+  return evidence
+    .replace(SECRET_NAME_RE, "$1=[REDACTED]")
+    .replace(AUTH_HEADER_RE, "$1[REDACTED]")
+    .replace(ENTROPY_BLOB_RE, (blob) => {
+      // Keep short human-readable words; redact only high-entropy blobs.
+      const unique = new Set(blob).size;
+      if (unique >= 12 && /[0-9]/.test(blob) && /[a-zA-Z]/.test(blob)) {
+        return "[REDACTED]";
+      }
+      return blob;
+    });
+}
+
 // ─── Prompt builder ───────────────────────────────────────────────────────────
 
 const DEEPSEEK_ENDPOINT = "https://api.deepseek.com/v1/chat/completions";
@@ -98,7 +131,7 @@ function buildPrompt(
       if (v.cvssScore != null) parts.push(`  CVSS: ${v.cvssScore}`);
       if (v.cweId) parts.push(`  CWE: ${v.cweId}`);
       parts.push(`  Description: ${v.description}`);
-      if (v.evidence) parts.push(`  Evidence: ${v.evidence.slice(0, 250)}`);
+      if (v.evidence) parts.push(`  Evidence: ${redactSensitiveEvidence(v.evidence).slice(0, 250)}`);
       parts.push(`  Fix: ${v.solution}`);
       return parts.join("\n");
     })

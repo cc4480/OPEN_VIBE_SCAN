@@ -1,4 +1,4 @@
-import { pgTable, text, uuid, integer, timestamp, jsonb, index, uniqueIndex } from "drizzle-orm/pg-core";
+import { pgTable, text, uuid, integer, timestamp, jsonb, boolean, index, uniqueIndex } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
@@ -19,6 +19,8 @@ export const scansTable = pgTable("scans", {
   error: text("error"),
   /** Live per-probe checklist — array of ScanStep objects written during scanning */
   steps: jsonb("steps"),
+  /** User opted out of third-party AI analysis of this scan's findings */
+  aiOptOut: boolean("ai_opt_out").notNull().default(false),
 }, (table) => [
   index("idx_scans_user_id").on(table.userId),
   index("idx_scans_status").on(table.status),
@@ -151,6 +153,32 @@ export const reportSharesTable = pgTable("report_shares", {
 ]);
 
 export type ReportShare = typeof reportSharesTable.$inferSelect;
+
+/**
+ * DNS ownership verification challenges. A scan may only run against a
+ * hostname the requesting user has proven control of by publishing a
+ * `_secscan-challenge.<hostname>` TXT record containing the challenge token.
+ * A verified row stays valid until `expiresAt`, after which the target must
+ * be re-verified.
+ */
+export const domainVerificationsTable = pgTable("domain_verifications", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  userId: text("user_id").notNull(),
+  /** Lower-cased exact hostname from the scan target URL */
+  hostname: text("hostname").notNull(),
+  /** Challenge token the user must publish in the TXT record */
+  token: text("token").notNull().unique(),
+  status: text("status", { enum: ["pending", "verified"] }).notNull().default("pending"),
+  verifiedAt: timestamp("verified_at", { withTimezone: true }),
+  /** Verification validity window — null while still pending */
+  expiresAt: timestamp("expires_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [
+  uniqueIndex("uq_domain_verifications_user_hostname").on(table.userId, table.hostname),
+  index("idx_domain_verifications_hostname").on(table.hostname),
+]);
+
+export type DomainVerification = typeof domainVerificationsTable.$inferSelect;
 
 /**
  * Single-row key-value store for persisting EOL data fetched from endoflife.date.

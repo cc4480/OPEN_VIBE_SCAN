@@ -10,6 +10,7 @@
 import { randomUUID } from "node:crypto";
 import type { ScanVulnerability } from "./scanner";
 import { OPEN_REDIRECT_PROBE, OPEN_REDIRECT_PARAMS } from "./payloads";
+import { validatedFetch } from "./targetGuard";
 
 const PROBE_TIMEOUT_MS = 8_000;
 
@@ -25,7 +26,7 @@ async function safeGet(
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const res = await fetch(url, { ...options, signal: controller.signal });
+    const res = await validatedFetch(url, { ...options, signal: controller.signal }, { timeoutMs });
     const body = await res.text().catch(() => "");
     const headers: Record<string, string> = {};
     res.headers.forEach((v, k) => { headers[k.toLowerCase()] = v; });
@@ -581,7 +582,7 @@ export async function checkDirectoryListing(
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), 6_000);
       try {
-        const res = await fetch(url, { signal: controller.signal, redirect: "follow" });
+        const res = await validatedFetch(url, { signal: controller.signal }, { timeoutMs: 6_000 });
         if (!res.ok) return null;
         const body = await res.text();
         const matched = DIRECTORY_LISTING_PATTERNS.some((rx) => rx.test(body));
@@ -627,7 +628,7 @@ export async function checkSecurityTxt(
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 6_000);
     try {
-      const res = await fetch(origin + p, { signal: controller.signal, redirect: "follow" });
+      const res = await validatedFetch(origin + p, { signal: controller.signal }, { timeoutMs: 6_000 });
       if (res.ok) {
         const body = await res.text();
         if (/Contact:|Expires:|Policy:/i.test(body)) return [];

@@ -21,6 +21,7 @@ import { callDeepSeek } from "./deepseek";
 import { checkSslLabs } from "./ssllabs";
 import { sendReportReadyEmail } from "./mailer";
 import { logger } from "./logger";
+import { checkTargetGate } from "./verification";
 import { randomUUID } from "node:crypto";
 import type { Job } from "pg-boss";
 
@@ -45,10 +46,24 @@ import { reprobe } from "./reprobe";
 
 
 async function processScanJob(job: ScanJob): Promise<void> {
-  const { scanId, userId, targetUrl, tier, monitorSubscriptionId } = job.data;
+  const { scanId, userId, targetUrl, tier, monitorSubscriptionId, aiOptOut } = job.data;
   const log = logger.child({ scanId, targetUrl, tier, monitorSubscriptionId });
 
   log.info("Scan job started");
+
+  // ── 0. Pre-flight gate — re-validate the target right before probing. ──
+  // Closes the resolve→request TOCTOU window (DNS may have changed since
+  // intake) and enforces the verification gate on every enqueue path,
+  // including the monitor scheduler.
+  const gate = await checkTargetGate(userId, targetUrl);
+  if (!gate.ok) {
+    log.warn({ reason: gate.reason }, "Scan blocked by pre-flight target gate");
+    await db
+      .update(scansTable)
+      .set({ status: "failed", error: `Scan blocked: ${gate.reason}`, completedAt: new Date() })
+      .where(eq(scansTable.id, scanId));
+    return;
+  }
 
   // ── 1. Mark as scanning + initialise per-probe step list ─────────────
   type ScanStep = {
@@ -244,8 +259,9 @@ async function processScanJob(job: ScanJob): Promise<void> {
   // ── 4. AI analysis (deep tier only) ──────────────────────────────────
   // Note: pack_5/pack_20 are credit-purchase tiers — scan records are always
   // created with "basic" or "deep", so only "deep" needs to be checked here.
+  // The user can opt out per scan; findings then ship without AI analysis.
   let aiAnalysis = null;
-  if (tier === "deep") {
+  if (tier === "deep" && !aiOptOut) {
     log.info("Calling DeepSeek AI analysis");
     // Confidence gate: only pass high-confidence findings to the AI to reduce noise
     const AI_CONFIDENCE_GATE = 65;
@@ -310,6 +326,7 @@ async function processScanJob(job: ScanJob): Promise<void> {
     },
     recon: reconRunResult?.recon ?? undefined,
     aiAnalysis: aiAnalysis ?? undefined,
+    aiAnalysisSkipped: aiOptOut ? "opted-out" : undefined,
     autoSuppressedCount: autoSuppressedCount > 0 ? autoSuppressedCount : undefined,
   };
 

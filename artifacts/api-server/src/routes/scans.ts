@@ -1,6 +1,7 @@
 import { Router, type IRouter } from "express";
 import { db, scansTable, reportsTable, creditsTable } from "@workspace/db";
 import { eq, and, desc } from "drizzle-orm";
+import { z } from "zod";
 import {
   CreateScanBody,
   ListScansResponseItem,
@@ -8,8 +9,32 @@ import {
 } from "@workspace/api-zod";
 import { stripe, PRICE_MAP, getOrigin } from "../lib/stripe";
 import { enqueueScan } from "../lib/queue";
+import { assertTargetSafe, TargetValidationError } from "../lib/targetGuard";
+import {
+  isVerified,
+  issueChallenge,
+} from "../lib/verification";
+import { rateLimit } from "../middlewares/rateLimit";
 
 const router: IRouter = Router();
+
+/**
+ * Scan creation is the most abuse-sensitive endpoint: each request can turn
+ * into outbound scanning traffic. Limit to 10 creations per user per hour
+ * (bursts of legitimate use stay well under this).
+ */
+const createScanLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  max: 10,
+  message: "Too many scan requests. Please wait before creating another scan.",
+});
+
+/** CreateScanBody plus the AI-analysis opt-out (kept in sync with the
+ *  generated CreateScanBody / CreateScanRequest until the orval spec is
+ *  regenerated). */
+const CreateScanBodyExtended = CreateScanBody.extend({
+  aiOptOut: z.boolean().optional(),
+});
 
 const STATUS_PROGRESS: Record<string, number> = {
   pending: 0,
@@ -72,32 +97,61 @@ router.get("/scans", async (req, res): Promise<void> => {
   }
 });
 
-router.post("/scans", async (req, res): Promise<void> => {
+router.post("/scans", createScanLimiter, async (req, res): Promise<void> => {
   if (!req.isAuthenticated()) {
     res.status(401).json({ error: "Unauthorized" });
     return;
   }
 
-  const parsed = CreateScanBody.safeParse(req.body);
+  const parsed = CreateScanBodyExtended.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: parsed.error.message });
     return;
   }
 
-  const { targetUrl, tier } = parsed.data;
+  const { targetUrl, tier, aiOptOut } = parsed.data;
 
   const isPack = tier === "pack_5" || tier === "pack_20";
   const paymentsDisabled = process.env.DISABLE_PAYMENTS === "true";
 
-  // Validate URL only for scan tiers
+  // ── Target safety gate (scan tiers only) ─────────────────────────────
+  // 1. Structural + SSRF checks: http(s), no credentials, allowlisted port,
+  //    and the hostname must resolve entirely to public IPs.
+  // 2. Ownership: the requester must have verified the hostname via a DNS
+  //    TXT challenge. No verification → no scan, no queue entry.
   if (!isPack) {
+    let hostname: string;
     try {
-      const parsedUrl = new URL(targetUrl);
-      if (!["http:", "https:"].includes(parsedUrl.protocol)) {
-        throw new Error("bad protocol");
+      const target = await assertTargetSafe(targetUrl);
+      hostname = target.hostname;
+    } catch (err) {
+      if (err instanceof TargetValidationError) {
+        res.status(400).json({ error: err.message, code: err.code });
+      } else {
+        res.status(400).json({ error: "Invalid target URL." });
       }
-    } catch {
-      res.status(400).json({ error: "Invalid URL. Must start with http:// or https://" });
+      return;
+    }
+
+    let verified = false;
+    try {
+      verified = await isVerified(req.user.id, hostname);
+    } catch (err) {
+      req.log.error({ err }, "Verification lookup failed");
+      res.status(500).json({ error: "Could not check target verification." });
+      return;
+    }
+
+    if (!verified) {
+      // Issue (or reuse) a challenge so the response tells the user exactly
+      // what DNS record to add.
+      const challenge = await issueChallenge(req.user.id, hostname).catch(() => null);
+      res.status(403).json({
+        error:
+          "This target has not been verified. Add the DNS TXT record below to prove you control it, then try again.",
+        code: "TARGET_NOT_VERIFIED",
+        verification: challenge,
+      });
       return;
     }
   }
@@ -112,10 +166,11 @@ router.post("/scans", async (req, res): Promise<void> => {
         targetUrl,
         tier,
         status: "paid",
+        aiOptOut: aiOptOut ?? false,
       })
       .returning();
 
-    await enqueueScan({ scanId: scan.id, userId: req.user.id, targetUrl, tier });
+    await enqueueScan({ scanId: scan.id, userId: req.user.id, targetUrl, tier, aiOptOut: aiOptOut ?? false });
 
     await db
       .update(scansTable)
@@ -205,6 +260,7 @@ router.post("/scans", async (req, res): Promise<void> => {
       targetUrl,
       tier,
       status: "pending",
+      aiOptOut: aiOptOut ?? false,
     })
     .returning();
 
@@ -226,6 +282,7 @@ router.post("/scans", async (req, res): Promise<void> => {
       userId: req.user.id,
       targetUrl,
       tier,
+      aiOptOut: aiOptOut ?? false,
     });
 
     await db

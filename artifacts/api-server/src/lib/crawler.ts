@@ -13,6 +13,7 @@
 
 import { randomUUID } from "node:crypto";
 import type { ScanVulnerability } from "./scanner";
+import { validatedFetch } from "./targetGuard";
 
 const PAGE_TIMEOUT_MS = 8_000;
 const CRAWL_TIMEOUT_MS = 30_000;
@@ -101,15 +102,14 @@ async function fetchPage(url: string, timeoutMs: number): Promise<PageResult | n
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const res = await fetch(url, {
+    const res = await validatedFetch(url, {
       method: "GET",
       signal: controller.signal,
-      redirect: "follow",
       headers: {
         "User-Agent": "Mozilla/5.0 (compatible; VibeScan-Security-Bot/1.0; +https://vibescan.app/bot)",
         "Accept": "text/html,application/xhtml+xml,*/*",
       },
-    });
+    }, { timeoutMs });
     const headers: Record<string, string> = {};
     res.headers.forEach((v, k) => { headers[k.toLowerCase()] = v; });
     const body = await res.text().catch(() => "");
@@ -138,11 +138,10 @@ async function probeUrl(
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const res = await fetch(url, {
+    const res = await validatedFetch(url, {
       signal: controller.signal,
-      redirect: "follow",
       headers: { "User-Agent": "Mozilla/5.0 (compatible; VibeScan-Security-Bot/1.0)" },
-    });
+    }, { timeoutMs });
     const headers: Record<string, string> = {};
     res.headers.forEach((v, k) => { headers[k.toLowerCase()] = v; });
     const body = await res.text().catch(() => "");

@@ -16,6 +16,7 @@
 import { randomUUID } from "node:crypto";
 import type { ScanVulnerability } from "./scanner";
 import { PATH_TRAVERSAL_TEMPLATES, classifyTraversalBody } from "./payloads";
+import { validatedFetch } from "./targetGuard";
 
 const TIMEOUT_MS = 7_000;
 
@@ -48,7 +49,7 @@ async function safeGet(url: string): Promise<{ status: number; body: string } | 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
   try {
-    const res = await fetch(url, { signal: controller.signal, redirect: "follow" });
+    const res = await validatedFetch(url, { signal: controller.signal }, { timeoutMs: TIMEOUT_MS });
     if (!res.ok && res.status !== 200) return null;
     const body = await res.text().catch(() => "");
     return { status: res.status, body };

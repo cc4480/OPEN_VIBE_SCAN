@@ -26,7 +26,7 @@ export default function Security() {
                 VibeScan is a tool for builders, agencies, and security researchers to verify the posture of applications they own or are authorized to test.
               </p>
               <p>
-                Only scan infrastructure you own or have explicit permission to test. SecScan is intended for defensive assessment—not unauthorized reconnaissance.
+                Only scan infrastructure you own or have explicit permission to test. SecScan is intended for defensive assessment—not unauthorized reconnaissance. To back that up, a scan cannot start until you prove control of the target: we issue a unique token that you publish as a DNS TXT record (<code className="text-foreground">_secscan-challenge</code>) on the domain. The scan stays blocked until the record is detected, and the verification expires after 30 days. Scan traffic is also restricted to public IP addresses — private, loopback, and link-local destinations are refused.
               </p>
             </div>
           </section>
@@ -53,10 +53,10 @@ export default function Security() {
             </h2>
             <div className="space-y-4 text-muted-foreground leading-relaxed">
               <p>
-                Scan targets, findings, and reports are stored so the initiating account can review results and compare future scans. Reports remain account-scoped unless the account owner creates a public share link.
+                Scan targets, findings, and reports are stored so the initiating account can review results and compare future scans. Reports remain account-scoped unless the account owner creates a public share link (share links expire after 30 days by default).
               </p>
               <p>
-                Findings may be sent to the configured AI analysis provider to produce plain-English summaries and remediation guidance. Avoid scanning systems when you are not authorized to submit their public response data for analysis.
+                Findings may be sent to the configured AI analysis provider to produce plain-English summaries and remediation guidance. Before anything is sent, evidence is scrubbed of likely secrets (tokens, keys, passwords, and high-entropy blobs are redacted), and you can opt out of AI analysis entirely per scan. Avoid scanning systems when you are not authorized to submit their public response data for analysis.
               </p>
             </div>
           </section>

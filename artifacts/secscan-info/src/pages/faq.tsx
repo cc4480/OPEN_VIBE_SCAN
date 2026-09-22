@@ -7,7 +7,7 @@ import { cn } from "@/lib/utils";
 const faqs = [
   {
     q: "Do I need to authorize you to scan my site?",
-    a: "If it's publicly accessible on the internet, we can scan it. VibeScan operates strictly externally and does not require agents, credentials, or code changes. You must only scan applications you have permission to test."
+    a: "Yes — and we enforce it. Before a scan can run, you must prove you control the target by adding a DNS TXT record we give you (a _secscan-challenge record containing a unique token). Scans stay blocked until that record is detected, and the verification expires after 30 days. Only scan applications you own or have explicit permission to test."
   },
   {
     q: "Is the scan safe for production environments?",
